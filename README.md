@@ -1,177 +1,117 @@
 # Video Doc Tool
-DDA video documentation compressor template
 
-Browser-only video compressor for projects following the DDA template. Drag a file or
-folder, hit Start, get a 1080p / 30 fps / H.264 / AAC MP4 you can hand in.
+DDA video documentation compressor template — runs entirely in your browser.
 
-> **Note.** This app targets the same delivery spec as the Adobe Media
-> Encoder preset *"Vimeo 30 FPS High Quality 1080p HD DDA"*, but it is
-> not byte-for-byte identical to AME. Browser encoders differ slightly. Use
-> this when you need a compatible-enough MP4 fast; use AME when you need
-> exact parity.
+**▸ Open the app:** **<https://languel.github.io/videodoctool/>**
 
-## Two ways to run
+Drop a video, click Export, download a class-ready MP4.
 
-### 1. Single-file HTML (click-and-run)
+> **Note.** This targets the same delivery spec as the Adobe Media Encoder
+> preset *"Vimeo 30 FPS High Quality 1080p HD DDA"*, but the browser
+> encoder is not byte-for-byte identical to AME. Browser output may differ
+> slightly. Use AME when you need exact parity for a final delivery; use
+> this when you need a compatible-enough MP4 fast.
 
-The whole app — UI, encoder wrapper, ffmpeg.wasm worker — is bundled into
-**one** `dist/dda-compressor.html` you can double-click.
+---
 
-```sh
-npm install
-npm run build
-open dist/dda-compressor.html       # macOS
-xdg-open dist/dda-compressor.html   # Linux
-```
+## How to use
 
-The first encode downloads `@ffmpeg/core` (~32 MB wasm) from a CDN. After
-that, it's offline-capable for the rest of the browser session.
+1. Open <https://languel.github.io/videodoctool/> in **Chrome, Edge, or Firefox** on your computer.
+2. Drag a video file (`.mp4` / `.mov` / `.webm` / `.mkv` / `.gif` / `.m4v`) into the dropzone, or click **Choose…**.
+3. Click **Export**.
+4. When the row turns and the **Exported** preview appears, click **Download**.
 
-### 2. Dev server (faster iteration, multi-thread ffmpeg)
+That's it. Multiple files at once: drop them all (or a folder), the queue
+encodes them one at a time. Each file is an independent download.
 
-```sh
-npm run dev   # http://127.0.0.1:5173
-```
-
-The dev server sets the cross-origin isolation headers needed for
-`SharedArrayBuffer` so ffmpeg.wasm runs in its multi-threaded build —
-roughly 2× faster than the single-thread fallback.
-
-## What it produces
-
-`originalname_h264_show.mp4`
+### What you get
 
 ```
 1920×1080 · 30 fps · H.264 (High @ L4.2) MP4
 AAC stereo · 48 kHz · 320 kbps
-~18 Mbps target (max 20)
-keyframe interval 90 frames
-+faststart (moov at front)
+~18 Mbps target  (max 20 Mbps)
++faststart  (moov box at the front)
 ```
 
-All settings are adjustable from the **Export settings (advanced)** panel.
-"Reset to DDA preset" puts everything back.
+Filename: `<original>_h264_show.mp4`
 
-## How encoding works
+### Changing the preset
 
-There are two encoder paths behind a single `Encoder` interface
-(`src/encoders/types.ts`):
+The default is correct for class delivery. To override for a one-off, click
+the chevron on the **DDA doc preset** bar and adjust resolution, fps,
+bitrate, etc. Click **reset** to return to the DDA defaults.
 
-1. **`ffmpeg-wasm`** — runs `libx264` + `aac` in WebAssembly, equivalent to
-   the local `dda_video_template_compress.sh` script. Slower, but works
-   everywhere with WebAssembly. **This is the working v1 path.**
-2. **`webcodecs`** — uses the browser's native `VideoEncoder` /
-   `AudioEncoder`. Much faster (often hardware-accelerated) but H.264 + AAC
-   support varies by browser. **Support detection only; full pipeline TODO.**
+### Light / dark theme
 
-The "Encoder" dropdown in advanced settings lets you pin one path. "Auto"
-picks the best available; in this first pass that means ffmpeg.wasm.
+Toggle in the top-right corner. Your choice persists across visits.
+
+---
+
+## Privacy
+
+Everything happens in your browser tab. The first time you encode in a
+session, the page downloads ~32 MB of WebAssembly (`ffmpeg-core`) from a
+CDN — that's the entirety of the network activity. Your video files
+**never leave your computer**.
+
+The page itself is ~40 KB. After the wasm is cached, you can disconnect
+from the network and keep encoding.
+
+---
 
 ## Browser support
 
-| Browser              | Single-file (file://) | Dev server (http://) |
-| -------------------- | :-------------------: | :------------------: |
-| Chrome / Edge        |          ✅           |          ✅           |
-| Firefox              |          ✅           |          ✅           |
-| Safari               |       partial         |       partial         |
+| Browser              | Status                                       |
+| -------------------- | -------------------------------------------- |
+| Chrome / Edge        | ✅ recommended                               |
+| Firefox              | ✅                                           |
+| Safari               | ⚠️ partial — works but less thoroughly tested |
 
-## Why the single-file build needed special handling
+If something doesn't work in your browser, try Chrome or Firefox.
 
-`@ffmpeg/ffmpeg` constructs its main worker with
-`new Worker(new URL("./worker.js", import.meta.url), { type: "module" })`.
-When the page is at a `null` origin (which is what `file://` gets), Chrome
-blocks cross-origin worker scripts entirely — the worker won't even start.
+---
 
-The build script (`scripts/build.mjs`) pre-bundles the FFmpeg worker source
-with esbuild and inlines it on `window.__DDA_FFMPEG_WORKER_SRC`. At load
-time the encoder converts that string into a same-origin `blob:` URL and
-passes it via `classWorkerURL`. With a same-origin worker in hand, the
-worker can fetch ffmpeg-core from any CDN with permissive CORS (unpkg).
+## Troubleshooting
 
-If you run the dev server instead, the page is at an http(s) origin and you
-get cross-origin isolation headers, so `SharedArrayBuffer` is available and
-ffmpeg.wasm uses the multi-threaded core.
+**Stuck at 0%?** Open the developer console (Cmd+Opt+I → Console). The
+encoder logs `[ffmpeg stderr]` lines when it's running; if you see those,
+the encode is in progress (long videos take a while). If you see a red
+error message, copy it into a GitHub issue.
 
-## Memory notes
+**`Refused to cross-origin redirects of the top-level worker script`?**
+Hard-reload the page (Cmd+Shift+R). This was a bug in earlier versions; the
+current build sidesteps it.
 
-ffmpeg.wasm keeps the whole input file in its in-WASM filesystem. Long
-videos (>5 minutes at 4K source) can OOM the tab. The app processes files
-one at a time and clears the wasm filesystem between encodes.
+**Output file is 0 bytes?** Almost always a container/codec edge case
+ffmpeg.wasm couldn't handle. Try opening the source in QuickTime, exporting
+as `.mp4`, then re-running. Or use Adobe Media Encoder for that file.
 
-For very long files, prefer the local shell script
-(`dda_video_template_compress.sh`) in the project root.
+**Long videos OOM the tab?** ffmpeg.wasm holds the whole file in memory.
+For inputs over ~5 minutes at 4K source, prefer the local shell script in
+`dda_video_template_compress.sh`.
 
-## Project layout
+---
 
-```
-index.html                # template — script/style placeholders are inlined at build time
-scripts/
-  build.mjs               # esbuild bundle + single-file HTML emitter
-src/
-  main.ts
-  app.ts
-  styles.css
-  encoders/
-    types.ts              # Encoder interface + DDA_PRESET
-    ffmpegWasmEncoder.ts  # primary v1 encoder
-    webcodecsEncoder.ts   # support detection + stub
-  media/
-    fileInput.ts          # drag/drop + folder walking
-    metadata.ts           # duration / dimensions probe
-    preview.ts            # original vs encoded preview
-    scaleCanvas.ts        # contain-fit math for letterbox/pillarbox
-    mux.ts                # mp4-muxer integration (stub)
-  ui/
-    dropzone.ts
-    queue.ts              # per-item rows
-    progress.ts           # overall N/M + spinner
-  utils/
-    time.ts
-    formatBytes.ts
-    support.ts            # feature detection + H.264 codec candidates
-```
+## Image sequences
 
-## Test fixture workflow
+The app accepts folders of PNG/JPG/etc. and groups them into "image
+sequence" rows. **Encoding image sequences is not yet implemented** — the
+row will show in the queue but Export will report it as unsupported. For
+image-sequence delivery, use Adobe Media Encoder. (Tracked as a TODO.)
 
-1. `npm run build`
-2. `open dist/dda-compressor.html` (or double-click in Finder)
-3. Drop a short `.mp4` (10 s – 2 min) onto the dropzone.
-4. Source preview appears; metadata fills in within ~1 s.
-5. Click **Start**.
-6. Watch the row's stage move *analyzing → encoding → muxing → done*.
-7. Click **Download** (or the link in the preview pane).
+---
 
-## Bugs fixed during initial testing
+## Standalone download
 
-These are notes for future maintainers.
+Each release also publishes a zipped single-HTML file you can keep locally
+and double-click anywhere — no internet required after the first encode
+caches the wasm.
 
-- `String.prototype.replace(regex, "...")` interprets `$&`, `$'`, `` $` ``, and
-  `$<n>` as substitution patterns. Minified JS often contains those as
-  variable names, which silently corrupted the inlined bundle. Build script
-  uses the *function* form of replace.
-- A `null`-origin page can't construct a `Worker` from a cross-origin URL,
-  even with permissive CORS. Pre-bundle the worker and load via blob URL.
-- `@ffmpeg/ffmpeg` 0.12 always constructs the worker as `type: "module"`.
-  esbuild's IIFE format produces script content that works as either classic
-  or module worker — but Chromium's `headless-shell` can't run module
-  workers from blob URLs at all. Real Chrome and Firefox both work fine;
-  testing with Chromium-headless will mislead you.
+**▸ [Download `videodoctool.zip`](https://github.com/languel/videodoctool/releases/latest/download/videodoctool.zip)** ([all releases](https://github.com/languel/videodoctool/releases))
 
-## TODO
+---
 
-- **WebCodecs encode path.** Implement mp4box.js demux → `VideoDecoder` →
-  canvas scale/pad → `VideoEncoder` (`avc1.64002A`, falling back) →
-  mp4-muxer. Once landed, swap the priority order in `pickEncoder()` so
-  WebCodecs wins in "auto" mode.
-- **AAC handling.** When WebCodecs `AudioEncoder` AAC is unavailable, decide
-  whether to copy compatible audio or always fall through to ffmpeg.wasm.
-- **Two-pass ffmpeg.wasm mode.** The local shell script does VBR 2-pass; v1
-  here does single-pass. Wire a config flag and a second pass for parity.
-- **WebGPU scaling.** `media/scaleCanvas.ts` has a Canvas2D contain-fit. A
-  WebGPU path would offload the scale step from the main thread.
-- **ZIP download for batches.** Each row has its own Download button; a
-  "Download all" zip is in the spec for v1.5.
-- **Offline-first single file.** Optionally embed `ffmpeg-core.wasm` itself
-  as base64 so the click-and-run HTML works without internet on first use.
-- **Configurable defaults via URL params** so instructors can pin a custom
-  preset (`?vbitrate=12&res=1280x720`).
+## For developers
+
+See **[BUILD.md](BUILD.md)** for build setup, dev server, architecture, and
+the bug log from the initial port.

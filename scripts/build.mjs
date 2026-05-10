@@ -36,7 +36,7 @@ const ENTRY = path.join(ROOT, "src/main.ts");
 const HTML_TEMPLATE = path.join(ROOT, "index.html");
 const CSS_FILE = path.join(ROOT, "src/styles.css");
 const OUT_DIR = path.join(ROOT, "dist");
-const OUT_HTML = path.join(OUT_DIR, "dda-compressor.html");
+const OUT_HTML = path.join(OUT_DIR, "videodoctool.html");
 
 /**
  * Bundle our custom FFmpeg worker (scripts/worker-src/ffmpeg-worker.js).
@@ -159,7 +159,7 @@ function startServer() {
   const port = 5173;
   const server = createServer(async (req, res) => {
     const url = (req.url || "/").split("?")[0];
-    if (url === "/" || url === "/index.html" || url === "/dda-compressor.html") {
+    if (url === "/" || url === "/index.html" || url === "/videodoctool.html") {
       try {
         const body = await fs.readFile(OUT_HTML);
         res.writeHead(200, {

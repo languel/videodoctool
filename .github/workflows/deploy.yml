@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed for the rolling "latest" release
   pages: write
   id-token: write
 
@@ -29,18 +29,31 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Stage site
-        # GitHub Pages serves whatever's in the artifact's root.
-        # We rename the single-file build to index.html so it's the default page.
+      - name: Stage Pages site
+        # The single-file build is renamed to index.html so it's the default
+        # page served at the Pages root.
         run: |
           mkdir -p _site
-          cp dist/dda-compressor.html _site/index.html
+          cp dist/videodoctool.html _site/index.html
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Stage release artifact
+        run: |
+          mkdir -p _release
+          cp dist/videodoctool.html _release/videodoctool.html
+          cd _release && zip -9 videodoctool.zip videodoctool.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
-  deploy:
+      - name: Upload release artifact (workflow scope)
+        uses: actions/upload-artifact@v4
+        with:
+          name: videodoctool-zip
+          path: _release/videodoctool.zip
+
+  deploy-pages:
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -49,3 +62,34 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: videodoctool-zip
+          path: _release
+
+      - name: Publish rolling "latest" release
+        # We use a fixed `latest` tag and update its single asset on every
+        # push. Direct download URL stays stable:
+        #   https://github.com/<owner>/<repo>/releases/latest/download/videodoctool.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES="Auto-built from commit ${{ github.sha }}.
+
+          Download \`videodoctool.zip\`, unzip, double-click \`videodoctool.html\`."
+
+          if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload latest _release/videodoctool.zip --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit  latest --notes "$NOTES" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create latest _release/videodoctool.zip \
+              --title "Latest build" \
+              --notes "$NOTES" \
+              --repo "$GITHUB_REPOSITORY"
+          fi

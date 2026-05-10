@@ -447,9 +447,27 @@ footer.foot {
   color: var(--muted);
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
   flex-wrap: wrap;
 }
+
+.foot-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.foot-links a {
+  color: var(--muted);
+  display: inline-flex;
+  line-height: 0;
+  padding: 4px;
+  margin: -4px 0;
+  border-radius: 3px;
+  text-decoration: none;
+}
+.foot-links a:hover { color: var(--ink); background: var(--btn-bg-hover); }
+.foot-links a svg { display: block; }
 
 /* Preview pane ---------------------------------------------- */
 

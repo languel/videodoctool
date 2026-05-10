@@ -1,9 +1,9 @@
 {
-  "name": "dda-h264-show-compressor",
+  "name": "videodoctool",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser-only video compressor for student MP4/MOV submissions. Targets the 'Vimeo 30 FPS High Quality 1080p HD DDA 2020' preset.",
+  "description": "Browser-only video compressor for student work. Targets the DDA delivery preset (1080p · 30 fps · H.264 MP4 · AAC).",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --watch --serve",
