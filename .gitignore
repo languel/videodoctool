@@ -1,0 +1,18 @@
+node_modules/
+dist/
+_site/
+
+# editor / OS cruft
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# leftovers from earlier Vite-based build (no longer used)
+vite.config.ts.timestamp-*.mjs
+.vite/

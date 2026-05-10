@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>video doc tool</title>
+
+    <!-- Inline-data favicon: stops Chrome from probing /favicon.ico, which on
+         file:// triggers a noisy "Unsafe attempt to load URL" warning. -->
+    <link rel="icon" href="data:," />
+
+    <!-- Geist + Geist Mono. Fails gracefully if offline; system stack falls back. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script>
+      // Apply persisted theme synchronously, before paint, to avoid a flash.
+      try {
+        var t = localStorage.getItem("sc.theme") || "dark";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (_) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    </script>
+  </head>
+  <body>
+    <div class="page">
+      <header class="top">
+        <div class="brand">video doc tool</div>
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle theme"></button>
+      </header>
+
+      <div id="drop" class="drop" tabindex="0" aria-label="Drop video files or a folder of images here">
+        <div class="drop-title">Drop videos, image sequences, or a folder</div>
+        <div class="drop-sub">
+          mp4 · mov · webm · mkv · gif · png · jpg · webp &nbsp;·&nbsp; stays on your computer
+        </div>
+        <div id="drop-actions" class="drop-actions">
+          <button type="button" id="btn-choose" class="btn">Choose…</button>
+          <button type="button" id="btn-demo" class="btn ghost">Load demo</button>
+        </div>
+        <input type="file" id="file-input" class="sr" multiple />
+        <input type="file" id="folder-input" class="sr" multiple webkitdirectory directory />
+      </div>
+
+      <div id="banner" class="banner"></div>
+
+      <div id="spec-mount"></div>
+
+      <section id="queue" class="queue" hidden>
+        <div class="queue-head">
+          <div id="queue-title" class="queue-title"></div>
+          <div id="queue-actions" class="queue-actions"></div>
+        </div>
+        <div id="queue-list"></div>
+      </section>
+
+      <div class="actions">
+        <button type="button" id="btn-export" class="btn primary" disabled>Export</button>
+        <button type="button" id="btn-download-all" class="btn" hidden>Download all</button>
+        <span class="spacer"></span>
+        <span id="summary" class="summary"></span>
+      </div>
+
+      <footer class="foot">
+        <span>files stay on your computer · nothing is uploaded</span>
+        <span id="version">v0.1</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
