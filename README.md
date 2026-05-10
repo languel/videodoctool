@@ -1,13 +1,14 @@
-# DDA H.264 Show Compressor
+# Video Doc Tool
+DDA video documentation compressor template
 
-Browser-only video compressor for student MP4/MOV submissions. Drag a file or
+Browser-only video compressor for projects following the DDA template. Drag a file or
 folder, hit Start, get a 1080p / 30 fps / H.264 / AAC MP4 you can hand in.
 
-> **Honesty note.** This app targets the same delivery spec as the Adobe Media
-> Encoder preset *"Vimeo 30 FPS High Quality 1080p HD DDA 2020"*, but it is
+> **Note.** This app targets the same delivery spec as the Adobe Media
+> Encoder preset *"Vimeo 30 FPS High Quality 1080p HD DDA"*, but it is
 > not byte-for-byte identical to AME. Browser encoders differ slightly. Use
 > this when you need a compatible-enough MP4 fast; use AME when you need
-> exact parity for a final delivery.
+> exact parity.
 
 ## Two ways to run
 
