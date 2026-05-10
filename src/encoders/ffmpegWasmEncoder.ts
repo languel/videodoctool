@@ -313,24 +313,25 @@ export class FFmpegWasmEncoder implements Encoder {
   }
 
   async encode(job: EncodeJob): Promise<EncodeResult> {
-    const { file, settings, signal, onProgress } = job;
-    const startedAt = performance.now();
-    const update = (p: Partial<EncodeProgress>) => {
-      const elapsedMs = performance.now() - startedAt;
-      onProgress({
-        stage: p.stage ?? "encoding",
-        fileProgress: p.fileProgress ?? 0,
-        message: p.message,
-        elapsedMs,
-        etaMs: estimateEta(p.fileProgress ?? 0, elapsedMs),
-      });
-    };
+    const { kind } = job;
+    if (kind === "sequence") {
+      return this.encodeSequence(job);
+    }
+    return this.encodeVideo(job);
+  }
 
+  // ---- single-file video ----------------------------------------------
+
+  private async encodeVideo(job: EncodeJob): Promise<EncodeResult> {
+    const { files, settings, signal, name } = job;
+    const file = files[0];
+    if (!file) throw new Error("No input file");
+
+    const update = makeUpdater(job, performance.now());
     update({ stage: "analyzing", fileProgress: 0, message: "Loading ffmpeg.wasm…" });
     const ff = await getFFmpeg();
     if (signal.aborted) throw abortError();
 
-    // Wire progress. ffmpeg.wasm 0.12 emits { progress: 0..1, time: us }.
     const progressHandler = ({ progress }: { progress: number; time: number }) => {
       const clamped = Math.min(0.999, Math.max(0, progress));
       update({ stage: "encoding", fileProgress: clamped });
@@ -338,59 +339,159 @@ export class FFmpegWasmEncoder implements Encoder {
     ff.on("progress", progressHandler);
 
     const inputName = uniqueName("input", file.name);
-    const outputName = uniqueName("output", makeOutputFilename(file));
+    const outputName = uniqueName("output", makeOutputFilename(name));
 
-    const onAbort = () => {
-      try {
-        ff.terminate();
-      } catch {
-        /* ignore */
-      }
-      ffmpegInstance = null;
-      loadInstancePromise = null;
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-
+    const cleanupAbort = wireAbort(ff, signal);
     try {
       update({ stage: "decoding", fileProgress: 0, message: "Reading file…" });
       const data = await fetchFileBytes(file);
       if (signal.aborted) throw abortError();
       await ff.writeFile(inputName, data);
 
-      const args = buildFFmpegArgs(inputName, outputName, settings);
+      const args = buildVideoArgs(inputName, outputName, settings);
       update({ stage: "encoding", fileProgress: 0, message: "Encoding…" });
 
       const exitCode = await ff.exec(args);
       if (signal.aborted) throw abortError();
-      if (exitCode !== 0) {
-        throw new Error(`ffmpeg exited with code ${exitCode}`);
-      }
+      if (exitCode !== 0) throw new Error(`ffmpeg exited with code ${exitCode}`);
 
       update({ stage: "muxing", fileProgress: 0.99, message: "Reading output…" });
-      const out = await ff.readFile(outputName);
-      // Copy into a fresh ArrayBuffer-backed Uint8Array. SharedArrayBuffer-
-      // backed views aren't accepted by Blob's constructor type.
-      const copy = new Uint8Array(out.byteLength);
-      copy.set(out);
-      const blob = new Blob([copy], { type: "video/mp4" });
+      const blob = await readMp4Blob(ff, outputName);
 
-      const result: EncodeResult = {
+      update({ stage: "done", fileProgress: 1, message: "Done" });
+      return {
         blob,
-        filename: makeOutputFilename(file),
+        filename: makeOutputFilename(name),
         duration: NaN,
         originalBytes: file.size,
         outputBytes: blob.size,
         encoder: "ffmpeg-wasm",
       };
-      update({ stage: "done", fileProgress: 1, message: "Done" });
-      return result;
     } finally {
       ff.off("progress");
-      signal.removeEventListener("abort", onAbort);
+      cleanupAbort();
       try { await ff.deleteFile(inputName); } catch { /* ignore */ }
       try { await ff.deleteFile(outputName); } catch { /* ignore */ }
     }
   }
+
+  // ---- image sequence -------------------------------------------------
+
+  private async encodeSequence(job: EncodeJob): Promise<EncodeResult> {
+    const { files, settings, signal, name } = job;
+    if (files.length === 0) throw new Error("Image sequence has no files");
+
+    const update = makeUpdater(job, performance.now());
+    update({ stage: "analyzing", fileProgress: 0, message: "Loading ffmpeg.wasm…" });
+    const ff = await getFFmpeg();
+    if (signal.aborted) throw abortError();
+
+    // ffmpeg.wasm's progress callback uses output frame count vs estimated
+    // duration. With a sequence we know the target duration exactly.
+    const targetSeconds = files.length / settings.fps;
+    const progressHandler = ({ progress }: { progress: number; time: number }) => {
+      const clamped = Math.min(0.999, Math.max(0, progress));
+      update({ stage: "encoding", fileProgress: clamped });
+    };
+    ff.on("progress", progressHandler);
+
+    // Standardize on one extension. Mixed-extension sequences fall back to
+    // the first file's ext; ffmpeg's pattern-input requires consistent ext.
+    const ext = (files[0].name.match(/\.([a-z0-9]+)$/i)?.[1] || "png").toLowerCase();
+    const stamp = Date.now().toString(36);
+    const dir = `seq_${stamp}`;
+    const outputName = uniqueName("output", makeOutputFilename(name));
+    const writtenPaths: string[] = [];
+
+    const cleanupAbort = wireAbort(ff, signal);
+    try {
+      update({ stage: "decoding", fileProgress: 0, message: `Writing ${files.length} frames…` });
+
+      // We can't mkdir from MiniFFmpeg's API; just put files in the wasm
+      // root with a name pattern. Pad to 6 digits — supports up to 999,999
+      // frames.
+      for (let i = 0; i < files.length; i++) {
+        if (signal.aborted) throw abortError();
+        const data = await fetchFileBytes(files[i]);
+        const numbered = `${dir}_${String(i + 1).padStart(6, "0")}.${ext}`;
+        await ff.writeFile(numbered, data);
+        writtenPaths.push(numbered);
+        if ((i & 31) === 0) {
+          // Keep the UI responsive — stream a write-phase pseudo-progress.
+          update({
+            stage: "decoding",
+            fileProgress: i / files.length * 0.05, // first 5% reserved for write
+            message: `Writing frame ${i + 1} / ${files.length}`,
+          });
+        }
+      }
+      if (signal.aborted) throw abortError();
+
+      const inputPattern = `${dir}_%06d.${ext}`;
+      const args = buildSequenceArgs(inputPattern, outputName, settings, targetSeconds);
+      update({ stage: "encoding", fileProgress: 0, message: "Encoding…" });
+
+      const exitCode = await ff.exec(args);
+      if (signal.aborted) throw abortError();
+      if (exitCode !== 0) throw new Error(`ffmpeg exited with code ${exitCode}`);
+
+      update({ stage: "muxing", fileProgress: 0.99, message: "Reading output…" });
+      const blob = await readMp4Blob(ff, outputName);
+
+      const totalBytes = files.reduce((s, f) => s + (f.size || 0), 0);
+      update({ stage: "done", fileProgress: 1, message: "Done" });
+      return {
+        blob,
+        filename: makeOutputFilename(name),
+        duration: targetSeconds,
+        originalBytes: totalBytes,
+        outputBytes: blob.size,
+        encoder: "ffmpeg-wasm",
+      };
+    } finally {
+      ff.off("progress");
+      cleanupAbort();
+      // Clean up wasm FS — important for large sequences.
+      for (const p of writtenPaths) {
+        try { await ff.deleteFile(p); } catch { /* ignore */ }
+      }
+      try { await ff.deleteFile(outputName); } catch { /* ignore */ }
+    }
+  }
+}
+
+// ---- shared helpers --------------------------------------------------
+
+function makeUpdater(job: EncodeJob, startedAt: number) {
+  return (p: Partial<EncodeProgress>) => {
+    const elapsedMs = performance.now() - startedAt;
+    job.onProgress({
+      stage: p.stage ?? "encoding",
+      fileProgress: p.fileProgress ?? 0,
+      message: p.message,
+      elapsedMs,
+      etaMs: estimateEta(p.fileProgress ?? 0, elapsedMs),
+    });
+  };
+}
+
+function wireAbort(ff: MiniFFmpeg, signal: AbortSignal): () => void {
+  const onAbort = () => {
+    try { ff.terminate(); } catch { /* ignore */ }
+    ffmpegInstance = null;
+    loadInstancePromise = null;
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
+}
+
+async function readMp4Blob(ff: MiniFFmpeg, outputName: string): Promise<Blob> {
+  const out = await ff.readFile(outputName);
+  // Copy into a fresh ArrayBuffer-backed Uint8Array. SharedArrayBuffer-
+  // backed views aren't accepted by Blob's constructor type.
+  const copy = new Uint8Array(out.byteLength);
+  copy.set(out);
+  return new Blob([copy], { type: "video/mp4" });
 }
 
 /* ------------------------------------------------------------------ */
@@ -398,10 +499,10 @@ export class FFmpegWasmEncoder implements Encoder {
 /* ------------------------------------------------------------------ */
 
 /**
- * Builds the ffmpeg argv. Mirrors dda_video_template_compress.sh, single-pass.
- * Uses preset=medium because libx264 at "slow" is too slow in the browser.
+ * Builds the ffmpeg argv for a single-file video input. Mirrors the local
+ * shell script `dda_video_template_compress.sh`, single-pass.
  */
-function buildFFmpegArgs(
+function buildVideoArgs(
   input: string,
   output: string,
   s: ExportSettings,
@@ -417,6 +518,57 @@ function buildFFmpegArgs(
     "-i", input,
     "-map", "0:v:0",
     "-map", "0:a?",
+    "-vf", vf,
+    "-r", String(s.fps),
+    "-c:v", "libx264",
+    "-profile:v", "high",
+    "-level:v", "4.2",
+    "-b:v", `${Math.round(s.videoBitrate / 1000)}k`,
+    "-maxrate", `${Math.round(s.maxVideoBitrate / 1000)}k`,
+    "-bufsize", `${Math.round(bufsize / 1000)}k`,
+    "-g", String(s.keyframeInterval),
+    "-keyint_min", String(s.keyframeInterval),
+    "-preset", "medium",
+    "-c:a", "aac",
+    "-b:a", `${Math.round(s.audioBitrate / 1000)}k`,
+    "-ar", String(s.audioSampleRate),
+    "-ac", String(s.audioChannels),
+    "-movflags", "+faststart",
+    output,
+  ];
+}
+
+/**
+ * Builds the ffmpeg argv for an image sequence input. Sources frames from
+ * `pattern` at the configured framerate, generates a silent stereo AAC
+ * track via lavfi (so the output meets the DDA preset's audio expectation),
+ * and stops when the image input ends.
+ */
+function buildSequenceArgs(
+  pattern: string,
+  output: string,
+  s: ExportSettings,
+  durationSeconds: number,
+): string[] {
+  const vf =
+    `scale=${s.width}:${s.height}:force_original_aspect_ratio=decrease,` +
+    `pad=${s.width}:${s.height}:(ow-iw)/2:(oh-ih)/2,` +
+    `format=yuv420p`;
+  const bufsize = Math.round(s.maxVideoBitrate * 2);
+  return [
+    "-y",
+    "-hide_banner",
+    // Input 0: image sequence at the desired framerate.
+    "-framerate", String(s.fps),
+    "-i", pattern,
+    // Input 1: silent stereo audio so the output has an AAC track matching
+    // the DDA preset. -shortest below cuts it to the image duration.
+    "-f", "lavfi",
+    "-t", String(Math.max(0.1, durationSeconds)),
+    "-i", `anullsrc=channel_layout=stereo:sample_rate=${s.audioSampleRate}`,
+    "-map", "0:v",
+    "-map", "1:a",
+    "-shortest",
     "-vf", vf,
     "-r", String(s.fps),
     "-c:v", "libx264",

@@ -12,14 +12,16 @@ export const VIDEO_EXT = [
   "webm",
   "mkv",
   "avi",
+  // Animated formats — ffmpeg reads them as video. Static gif/webp produce a
+  // 1-frame video, which is fine.
   "gif",
+  "webp",
 ] as const;
 
 export const IMAGE_EXT = [
   "png",
   "jpg",
   "jpeg",
-  "webp",
   "tif",
   "tiff",
   "bmp",

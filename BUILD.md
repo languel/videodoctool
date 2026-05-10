@@ -124,7 +124,17 @@ Two implementations:
 
 ### `ffmpeg-wasm` (primary, working)
 
-Lives in `src/encoders/ffmpegWasmEncoder.ts`. The flow:
+Lives in `src/encoders/ffmpegWasmEncoder.ts`. Branches on `EncodeJob.kind`:
+
+- **`video`** (default) — single source file → ffmpeg with the standard
+  argv from `dda_video_template_compress.sh`.
+- **`sequence`** — multiple image files → write each to wasm FS as
+  `seq_<stamp>_NNNNNN.<ext>`, then `ffmpeg -framerate <fps> -i pattern
+  ...` plus a silent `lavfi anullsrc` second input mapped as the audio
+  track (so the output meets the DDA preset's AAC channel/rate spec). The
+  `-shortest` flag stops encoding when the image input ends.
+
+The flow:
 
 1. Main thread fetches `ffmpeg-core.js` (text) and `ffmpeg-core.wasm`
    (bytes) from unpkg's CDN.
@@ -240,9 +250,6 @@ Pages enablement (it's idempotent — safe to re-run).
   canvas scale/pad → `VideoEncoder` (`avc1.64002A` first, falling back) →
   mp4-muxer. Once landed, swap the priority order in `pickEncoder()` so
   WebCodecs wins in "auto" mode.
-- **Image sequence encoding.** Currently the UI accepts and groups image
-  sequences but Export throws "image sequence encoding coming soon". Wire
-  ffmpeg's concat demuxer or `frame_%04d.png` pattern through the encoder.
 - **AAC handling for the WebCodecs path.** When `AudioEncoder` AAC is
   unavailable, decide between copying compatible audio or always falling
   through to ffmpeg.wasm.
@@ -253,5 +260,12 @@ Pages enablement (it's idempotent — safe to re-run).
 - **Offline-first single file.** Optionally embed `ffmpeg-core.wasm` itself
   as base64 so the click-and-run HTML works without internet on first use.
   Trade-off: HTML grows from ~40 KB to ~32 MB.
+- **YouTube / Vimeo / TikTok URL ingest.** Currently shows a friendly
+  refusal — these need server-side `yt-dlp` (or similar) to resolve to a
+  fetchable file. Could be wired up via a small companion API.
+- **Image-sequence Original preview.** The Exported pane lights up after
+  encoding, but the Original pane is just a "N frames · ext" placeholder.
+  Could decode the first frame to show a thumbnail, or stitch the entire
+  sequence into a quick preview video.
 - **Configurable defaults via URL params** so instructors can pin a custom
   preset (`?vbitrate=12&res=1280x720`).

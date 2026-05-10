@@ -57,8 +57,18 @@ export interface EncodeProgress {
   etaMs?: number;
 }
 
+export type JobKind = "video" | "sequence";
+
 export interface EncodeJob {
-  file: File;
+  /**
+   * Source files. Length 1 for kind="video"; N (1..N) for kind="sequence".
+   * Sequence files should be in render order — the encoder writes them to
+   * the wasm FS with numeric names and uses ffmpeg's pattern input.
+   */
+  files: File[];
+  kind: JobKind;
+  /** Display name (used to derive the output filename). */
+  name: string;
   settings: ExportSettings;
   signal: AbortSignal;
   onProgress: (progress: EncodeProgress) => void;
@@ -88,8 +98,14 @@ export interface Encoder {
   encode(job: EncodeJob): Promise<EncodeResult>;
 }
 
-/** Build the suggested output filename. */
-export function makeOutputFilename(input: File): string {
-  const base = input.name.replace(/\.[^.]+$/, "");
-  return `${base}_h264_show.mp4`;
+/** Build the suggested output filename from a display name. */
+export function makeOutputFilename(name: string): string {
+  // Strip trailing slash (common for sequence "folder/" names) and
+  // any extension, then add the canonical suffix.
+  const stripped = name.replace(/\/+$/g, "");
+  const dot = stripped.lastIndexOf(".");
+  const stem = dot > 0 ? stripped.slice(0, dot) : stripped;
+  // Sanitize for download — remove path separators.
+  const safe = stem.replace(/[\\/]/g, "_");
+  return `${safe}_h264_show.mp4`;
 }

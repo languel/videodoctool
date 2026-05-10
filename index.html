@@ -38,12 +38,23 @@
       <div id="drop" class="drop" tabindex="0" aria-label="Drop video files or a folder of images here">
         <div class="drop-title">Drop videos, image sequences, or a folder</div>
         <div class="drop-sub">
-          mp4 · mov · webm · mkv · gif · png · jpg · webp &nbsp;·&nbsp; stays on your computer
+          mp4 · mov · webm · mkv · gif · webp · png · jpg &nbsp;·&nbsp; stays on your computer
         </div>
         <div id="drop-actions" class="drop-actions">
           <button type="button" id="btn-choose" class="btn">Choose…</button>
-          <button type="button" id="btn-demo" class="btn ghost">Load demo</button>
         </div>
+        <form id="url-form" class="url-form" autocomplete="off">
+          <span class="url-prompt">or paste a video URL:</span>
+          <input
+            type="url"
+            id="url-input"
+            class="url-input"
+            placeholder="https://example.com/clip.mp4"
+            inputmode="url"
+            spellcheck="false"
+          />
+          <button type="submit" id="btn-add-url" class="btn">Add</button>
+        </form>
         <input type="file" id="file-input" class="sr" multiple />
         <input type="file" id="folder-input" class="sr" multiple webkitdirectory directory />
       </div>

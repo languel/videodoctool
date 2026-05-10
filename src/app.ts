@@ -21,31 +21,14 @@ import {
 } from "./encoders/types.js";
 import { FFmpegWasmEncoder } from "./encoders/ffmpegWasmEncoder.js";
 
-interface DemoSeed {
-  kind: "video" | "sequence";
-  name: string;
-  size: number;
-  dur: number;
-  w: number;
-  h: number;
-  frames?: number;
-  ext?: string;
-}
-
-const DEMO_FILES: DemoSeed[] = [
-  { kind: "video",    name: "alex_chen_final_cut.mov", size: 482_300_000, dur: 184, w: 3840, h: 2160 },
-  { kind: "video",    name: "midterm_show_reel.mp4",   size: 219_700_000, dur: 92,  w: 1920, h: 1080 },
-  { kind: "sequence", name: "render_passes/",          size: 612_400_000, dur: 240, w: 3840, h: 2160, frames: 7200, ext: "png" },
-  { kind: "video",    name: "p3_capstone_v3.webm",     size: 211_400_000, dur: 188, w: 1920, h: 1080 },
-];
-
 interface Els {
   themeBtn: HTMLButtonElement;
   drop: HTMLElement;
   fileInput: HTMLInputElement;
   folderInput: HTMLInputElement;
   chooseBtn: HTMLButtonElement;
-  demoBtn: HTMLButtonElement;
+  urlForm: HTMLFormElement;
+  urlInput: HTMLInputElement;
   banner: HTMLElement;
   specMount: HTMLElement;
   queueRoot: HTMLElement;
@@ -71,6 +54,7 @@ export function bootApp(): void {
   let currentAbort: AbortController | null = null;
   let currentItemId: string | null = null;
   let nextId = 1;
+  let bannerTimer: number | null = null;
 
   const queueView = new QueueView(els.queueRoot, els.queueTitle, els.queueActions, els.queueList, {
     onRemove: (id) => removeItem(id),
@@ -93,9 +77,10 @@ export function bootApp(): void {
     fileInput: els.fileInput,
     folderInput: els.folderInput,
     chooseBtn: els.chooseBtn,
-    demoBtn: els.demoBtn,
+    urlForm: els.urlForm,
+    urlInput: els.urlInput,
     onFiles: (files) => ingest(files),
-    onDemo: () => loadDemo(),
+    onUrl: (url) => void ingestFromUrl(url),
   });
 
   els.exportBtn.addEventListener("click", () => void runQueue());
@@ -143,7 +128,6 @@ export function bootApp(): void {
     }
 
     for (const [folder, imgs] of seqMap) {
-      // Preserve frame ordering by name (e.g. frame_0001.png, frame_0002.png).
       imgs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
       const totalSize = imgs.reduce((s, x) => s + (x.size || 0), 0);
       const ext = extOf(imgs[0].name);
@@ -168,10 +152,8 @@ export function bootApp(): void {
 
     if (newItems.length === 0) return;
     items = [...items, ...newItems];
-    // Auto-expand the preview pane for video items as soon as they're
-    // queued, so the user sees the source immediately and watches the
-    // Exported pane fill in once encoding finishes.
     for (const item of newItems) {
+      // Auto-expand video items so the preview pane is visible immediately.
       if (item.kind === "video") expanded[item.id] = true;
     }
     queueView.setExpanded(expanded);
@@ -190,26 +172,56 @@ export function bootApp(): void {
     }
   }
 
-  function loadDemo(): void {
-    const demoItems: QueueItem[] = DEMO_FILES.map((d) => ({
-      id: String(nextId++),
-      kind: d.kind,
-      name: d.name,
-      size: d.size,
-      dur: d.dur,
-      w: d.w,
-      h: d.h,
-      files: [], // No real files — demo only.
-      outSize: 0,
-      status: "queued",
-      progress: 0,
-      speed: 0,
-      frames: d.frames,
-      ext: d.ext,
-    }));
-    items = [...items, ...demoItems];
-    queueView.setItems(items);
-    refreshActions();
+  async function ingestFromUrl(url: string): Promise<void> {
+    if (/^(https?:)?\/\//.test(url) === false && !url.startsWith("/")) {
+      flashBanner(`That doesn't look like a URL: ${url}`, true);
+      return;
+    }
+
+    // Friendly refusal for streaming services we can't actually fetch.
+    const lower = url.toLowerCase();
+    const isStreamingHost =
+      /(?:youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|facebook\.com|twitter\.com|x\.com)/.test(
+        lower,
+      );
+    if (isStreamingHost) {
+      flashBanner(
+        "Streaming services (YouTube, Vimeo, etc.) need a server-side download (e.g. yt-dlp). Use a direct video URL instead.",
+        true,
+      );
+      return;
+    }
+
+    flashBanner(`Fetching ${url} …`, false);
+    try {
+      const res = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+
+      // Derive a filename from the URL (or fall back to a generic).
+      const u = new URL(url, document.baseURI);
+      let name = (u.pathname.split("/").pop() || "remote-video").trim();
+      if (!classify(name)) {
+        // No accepted extension on the URL — try to guess from MIME type,
+        // otherwise tag .mp4 and let ffmpeg figure it out.
+        const ext = mimeToExt(blob.type) || "mp4";
+        name = `remote-video.${ext}`;
+      }
+
+      const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+      ingest([file]);
+      clearBanner();
+    } catch (err) {
+      const e = err as Error;
+      if (/cors|cross/i.test(e.message) || /failed to fetch/i.test(e.message)) {
+        flashBanner(
+          `Couldn't fetch (likely CORS). The host needs to send Access-Control-Allow-Origin: *. Try downloading the file manually and dropping it in.`,
+          true,
+        );
+      } else {
+        flashBanner(`Couldn't fetch URL: ${e.message}`, true);
+      }
+    }
   }
 
   // ---- queue management ----------------------------------------------------
@@ -277,10 +289,7 @@ export function bootApp(): void {
 
       try {
         if (item.files.length === 0) {
-          throw new Error("demo file — no source to encode");
-        }
-        if (item.kind === "sequence") {
-          throw new Error("image sequence encoding coming soon");
+          throw new Error("no source files");
         }
         await encodeOne(encoder, item, currentAbort.signal);
       } catch (err) {
@@ -290,7 +299,6 @@ export function bootApp(): void {
         } else {
           item.status = "err";
           item.errorMessage = e.message;
-          // Surface in console for debugging.
           console.error("[encoder]", e);
         }
       } finally {
@@ -312,15 +320,16 @@ export function bootApp(): void {
     signal: AbortSignal,
   ): Promise<void> {
     const startedAt = performance.now();
-    const file = item.files[0];
 
     const onProgress = (p: EncodeProgress) => {
-      // Translate ffmpeg's 0..1 progress to % and a synthetic speed.
       const pct = Math.min(100, p.fileProgress * 100);
       const elapsedSec = (performance.now() - startedAt) / 1000;
-      const encodedSec = Number.isFinite(item.dur) && item.dur > 0
-        ? item.dur * p.fileProgress
-        : 0;
+      const targetDur = Number.isFinite(item.dur) && item.dur > 0
+        ? item.dur
+        : item.kind === "sequence" && item.frames
+          ? item.frames / preset.fps
+          : 0;
+      const encodedSec = targetDur > 0 ? targetDur * p.fileProgress : 0;
       const speed = elapsedSec > 0 && encodedSec > 0 ? encodedSec / elapsedSec : 0;
       item.progress = pct;
       item.speed = speed;
@@ -328,7 +337,9 @@ export function bootApp(): void {
     };
 
     const result = await encoder.encode({
-      file,
+      files: item.files,
+      kind: item.kind,
+      name: item.name,
       settings: preset,
       signal,
       onProgress,
@@ -338,7 +349,7 @@ export function bootApp(): void {
     item.progress = 100;
     item.speed = 0;
     item.outSize = result.outputBytes;
-    item.outFilename = result.filename || makeOutputFilename(file);
+    item.outFilename = result.filename || makeOutputFilename(item.name);
     if (item.outUrl) URL.revokeObjectURL(item.outUrl);
     item.outUrl = URL.createObjectURL(result.blob);
     item.outBlob = result.blob;
@@ -355,7 +366,7 @@ export function bootApp(): void {
       const a = document.createElement("a");
       const url = URL.createObjectURL(item.outBlob!);
       a.href = url;
-      a.download = item.outFilename || makeOutputFilename(item.files[0] ?? new File([], "out.mp4"));
+      a.download = item.outFilename || makeOutputFilename(item.name);
       document.body.appendChild(a);
       // Stagger so browsers don't suppress multi-download prompt.
       setTimeout(() => {
@@ -394,6 +405,27 @@ export function bootApp(): void {
     els.summary.textContent = parts.join(" · ");
   }
 
+  function flashBanner(msg: string, isError: boolean): void {
+    if (bannerTimer != null) {
+      window.clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+    els.banner.textContent = msg;
+    els.banner.classList.toggle("error", isError);
+    if (!isError) {
+      bannerTimer = window.setTimeout(() => clearBanner(), 4000);
+    }
+  }
+
+  function clearBanner(): void {
+    els.banner.textContent = "";
+    els.banner.classList.remove("error");
+    if (bannerTimer != null) {
+      window.clearTimeout(bannerTimer);
+      bannerTimer = null;
+    }
+  }
+
   function revokeUrls(item: QueueItem): void {
     if (item.srcUrl) URL.revokeObjectURL(item.srcUrl);
     if (item.outUrl) URL.revokeObjectURL(item.outUrl);
@@ -415,7 +447,8 @@ function collectEls(): Els {
     fileInput: $<HTMLInputElement>("file-input"),
     folderInput: $<HTMLInputElement>("folder-input"),
     chooseBtn: $<HTMLButtonElement>("btn-choose"),
-    demoBtn: $<HTMLButtonElement>("btn-demo"),
+    urlForm: $<HTMLFormElement>("url-form"),
+    urlInput: $<HTMLInputElement>("url-input"),
     banner: $("banner"),
     specMount: $("spec-mount"),
     queueRoot: $("queue"),
@@ -436,4 +469,15 @@ function guessDimsFromName(name: string): { w: number; h: number } {
   if (h === 1080) return { w: 1920, h };
   if (h === 2160) return { w: 3840, h };
   return { w: Math.round((h * 16) / 9), h };
+}
+
+function mimeToExt(mime: string): string | null {
+  if (!mime) return null;
+  if (mime.startsWith("video/mp4")) return "mp4";
+  if (mime.startsWith("video/quicktime")) return "mov";
+  if (mime.startsWith("video/webm")) return "webm";
+  if (mime.startsWith("video/x-matroska")) return "mkv";
+  if (mime.startsWith("image/gif")) return "gif";
+  if (mime.startsWith("image/webp")) return "webp";
+  return null;
 }

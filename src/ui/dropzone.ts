@@ -1,5 +1,5 @@
 /**
- * Drop zone. Wires the drop element + Choose / Load demo buttons.
+ * Drop zone. Wires the drop element + Choose button + URL input.
  *
  * The dropzone background is itself the picker click-target; the buttons
  * inside are siblings whose click handlers stop propagation so they don't
@@ -17,28 +17,37 @@ export interface DropzoneOptions {
   fileInput: HTMLInputElement;
   folderInput: HTMLInputElement;
   chooseBtn: HTMLButtonElement;
-  demoBtn: HTMLButtonElement;
+  urlForm: HTMLFormElement;
+  urlInput: HTMLInputElement;
   onFiles: (files: File[]) => void;
-  onDemo: () => void;
+  onUrl: (url: string) => void;
 }
 
 export function bindDropzone(opts: DropzoneOptions): void {
-  const { rootEl, fileInput, folderInput, chooseBtn, demoBtn, onFiles, onDemo } = opts;
+  const {
+    rootEl,
+    fileInput,
+    folderInput,
+    chooseBtn,
+    urlForm,
+    urlInput,
+    onFiles,
+    onUrl,
+  } = opts;
 
-  // Configure file input accept list (handlers + folder picker too).
   fileInput.setAttribute("accept", ACCEPT_ATTR);
-  // We don't expose a separate folder button — the same dropzone accepts both.
-  // The folder-input is here so users on Chromium that don't fire dragenter
-  // for folders can still use webkitdirectory via the picker if needed.
   folderInput.setAttribute("accept", ACCEPT_ATTR);
 
-  // Click on the dropzone area opens the file picker.
+  // Click on the dropzone area opens the file picker (but not on form/input).
   rootEl.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).closest("button")) return;
-    if ((e.target as HTMLElement).closest("input")) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button")) return;
+    if (target.closest("input")) return;
+    if (target.closest("form")) return;
     fileInput.click();
   });
   rootEl.addEventListener("keydown", (e) => {
+    if (e.target !== rootEl) return; // don't hijack typing in the URL input
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       fileInput.click();
@@ -48,11 +57,6 @@ export function bindDropzone(opts: DropzoneOptions): void {
   chooseBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     fileInput.click();
-  });
-
-  demoBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    onDemo();
   });
 
   fileInput.addEventListener("change", () => {
@@ -65,6 +69,17 @@ export function bindDropzone(opts: DropzoneOptions): void {
     const files = filesFromInput(folderInput.files);
     folderInput.value = "";
     if (files.length) onFiles(files);
+  });
+
+  // URL form
+  urlForm.addEventListener("click", (e) => e.stopPropagation());
+  urlForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const u = urlInput.value.trim();
+    if (!u) return;
+    onUrl(u);
+    urlInput.value = "";
   });
 
   // Drag and drop.
@@ -91,7 +106,6 @@ export function bindDropzone(opts: DropzoneOptions): void {
     if (files.length) onFiles(files);
   });
 
-  // Stop the browser from navigating away when a misdrop lands outside.
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => e.preventDefault());
 }

@@ -167,7 +167,11 @@ export class QueueView {
     // Column 1 — chevron (or empty placeholder for alignment).
     const chevCell = document.createElement("div");
     chevCell.className = "file-chev";
-    if (f.kind === "video" && f.srcUrl) {
+    // Show the chevron when there's something to preview: a video with a
+    // src, or any item that has finished encoding (so its Exported result
+    // is viewable).
+    const hasPreview = (f.kind === "video" && !!f.srcUrl) || f.status === "done";
+    if (hasPreview) {
       const chev = document.createElement("button");
       chev.type = "button";
       chev.className = "chev-btn" + (this.expanded[f.id] ? " expanded" : "");
@@ -239,10 +243,12 @@ export class QueueView {
       row.appendChild(bar);
     }
 
-    // Render the preview pane any time the row is expanded and there's
-    // something to preview. The Exported pane shows a state-aware
-    // placeholder until the encode completes.
-    if (this.expanded[f.id] && f.kind === "video") {
+    // Render the preview pane any time the row is expanded. The Original
+    // pane shows the source video for kind="video" (or a placeholder for
+    // image-sequence rows, which have no single source video). The
+    // Exported pane shows a state-aware placeholder until the encode
+    // completes.
+    if (this.expanded[f.id]) {
       row.appendChild(this.renderPreview(f));
     }
 
@@ -253,13 +259,23 @@ export class QueueView {
     const wrap = document.createElement("div");
     wrap.className = "preview";
 
-    // Original — show as soon as we have a srcUrl.
+    const originalPlaceholder = f.kind === "sequence"
+      ? `${f.frames || 0} frames · ${f.ext || ""}`
+      : "no source";
+    const originalMeta = f.kind === "sequence"
+      ? `${f.frames || 0} frames`
+      : f.w && f.h
+        ? `${f.w}×${f.h}`
+        : "";
+
+    // Original — for video kind, show the source if we have a srcUrl.
+    // For sequence kind, show a placeholder summarizing the input.
     wrap.appendChild(
       this.renderPreviewPane({
         label: "Original",
-        src: f.srcUrl,
-        meta: f.w && f.h ? `${f.w}×${f.h}` : "",
-        placeholderText: "no source",
+        src: f.kind === "video" ? f.srcUrl : undefined,
+        meta: originalMeta,
+        placeholderText: originalPlaceholder,
       }),
     );
 
