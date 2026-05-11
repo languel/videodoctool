@@ -8,7 +8,20 @@
 export interface ExportSettings {
   width: number;
   height: number;
+  /** Output frame rate. */
   fps: number;
+  /**
+   * Input frame rate for image-sequence encoding. Each input image lasts
+   * `1 / sequenceFps` seconds in the output.
+   *
+   * Set equal to `fps` for a "1 image = 1 output frame" pass-through.
+   * Set to 1 to make each image last a full second (slideshow style);
+   * the output is then duplicated up to `fps` so the final file still
+   * runs at the output frame rate.
+   *
+   * Ignored for `kind: "video"` jobs.
+   */
+  sequenceFps: number;
   /** Target video bitrate in bits/sec (e.g. 18_000_000 for 18 Mbps). */
   videoBitrate: number;
   /** Max video bitrate in bits/sec (e.g. 20_000_000 for 20 Mbps). */
@@ -26,6 +39,7 @@ export const DDA_PRESET: ExportSettings = {
   width: 1920,
   height: 1080,
   fps: 30,
+  sequenceFps: 30,
   videoBitrate: 18_000_000,
   maxVideoBitrate: 20_000_000,
   keyframeInterval: 90,

@@ -127,6 +127,15 @@ export class PresetPanel {
       (v) => { this.current = { ...this.current, fps: Number(v) }; },
     ));
 
+    // Image-sequence input rate. Output is always `fps`; this controls how
+    // long each input image lasts before the next one. 1 fps = 1 sec each.
+    grid.appendChild(this.makeNumber("Image seq fps",
+      () => this.current.sequenceFps,
+      "fps", 0.1, 120,
+      (n) => { this.current = { ...this.current, sequenceFps: n }; },
+      "any",
+    ));
+
     grid.appendChild(this.makeNumber("Video bitrate",
       () => Math.round(this.current.videoBitrate / 1_000_000),
       "Mbps", 1, 80,
@@ -219,6 +228,7 @@ export class PresetPanel {
     min: number,
     max: number,
     onPick: (n: number) => void,
+    step: string = "1",
   ): HTMLElement {
     const wrap = document.createElement("label");
     wrap.className = "pf";
@@ -231,6 +241,7 @@ export class PresetPanel {
     inp.type = "number";
     inp.min = String(min);
     inp.max = String(max);
+    inp.step = step;
     inp.value = String(getValue());
     inp.addEventListener("change", () => {
       const n = Number(inp.value);

@@ -21,6 +21,12 @@ import {
 } from "./encoders/types.js";
 import { FFmpegWasmEncoder } from "./encoders/ffmpegWasmEncoder.js";
 
+// Easter egg — pressing Add with an empty URL field substitutes this URL.
+// Pick something short and fun; an animated GIF exercises the new format
+// support path nicely.
+const EMPTY_URL_FALLBACK =
+  "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExcGFseWN3dTkxeHh3NXU3dG1pMjJnbDM1dzJqZzVlMmR3YTZzbGphYyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/lgcUUCXgC8mEo/giphy.gif";
+
 interface Els {
   themeBtn: HTMLButtonElement;
   drop: HTMLElement;
@@ -131,12 +137,13 @@ export function bootApp(): void {
       imgs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
       const totalSize = imgs.reduce((s, x) => s + (x.size || 0), 0);
       const ext = extOf(imgs[0].name);
+      const seqInputFps = Math.max(0.01, preset.sequenceFps || preset.fps);
       const item: QueueItem = {
         id: String(nextId++),
         kind: "sequence",
         name: folder === "__loose__" ? imgs[0].name : `${folder}/`,
         size: totalSize,
-        dur: imgs.length / preset.fps,
+        dur: imgs.length / seqInputFps,
         w: 0,
         h: 0,
         files: imgs,
@@ -173,6 +180,11 @@ export function bootApp(): void {
   }
 
   async function ingestFromUrl(url: string): Promise<void> {
+    // Easter egg: empty submission grabs a default GIF.
+    if (!url || !url.trim()) {
+      url = EMPTY_URL_FALLBACK;
+    }
+
     if (/^(https?:)?\/\//.test(url) === false && !url.startsWith("/")) {
       flashBanner(`That doesn't look like a URL: ${url}`, true);
       return;
@@ -324,10 +336,11 @@ export function bootApp(): void {
     const onProgress = (p: EncodeProgress) => {
       const pct = Math.min(100, p.fileProgress * 100);
       const elapsedSec = (performance.now() - startedAt) / 1000;
-      const targetDur = Number.isFinite(item.dur) && item.dur > 0
-        ? item.dur
-        : item.kind === "sequence" && item.frames
-          ? item.frames / preset.fps
+      const seqInputFps = Math.max(0.01, preset.sequenceFps || preset.fps);
+      const targetDur = item.kind === "sequence" && item.frames
+        ? item.frames / seqInputFps
+        : Number.isFinite(item.dur) && item.dur > 0
+          ? item.dur
           : 0;
       const encodedSec = targetDur > 0 ? targetDur * p.fileProgress : 0;
       const speed = elapsedSec > 0 && encodedSec > 0 ? encodedSec / elapsedSec : 0;

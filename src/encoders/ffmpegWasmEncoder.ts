@@ -388,7 +388,8 @@ export class FFmpegWasmEncoder implements Encoder {
 
     // ffmpeg.wasm's progress callback uses output frame count vs estimated
     // duration. With a sequence we know the target duration exactly.
-    const targetSeconds = files.length / settings.fps;
+    const inputFps = Math.max(0.01, settings.sequenceFps || settings.fps);
+    const targetSeconds = files.length / inputFps;
     const progressHandler = ({ progress }: { progress: number; time: number }) => {
       const clamped = Math.min(0.999, Math.max(0, progress));
       update({ stage: "encoding", fileProgress: clamped });
@@ -428,7 +429,7 @@ export class FFmpegWasmEncoder implements Encoder {
       if (signal.aborted) throw abortError();
 
       const inputPattern = `${dir}_%06d.${ext}`;
-      const args = buildSequenceArgs(inputPattern, outputName, settings, targetSeconds);
+      const args = buildSequenceArgs(inputPattern, outputName, settings, targetSeconds, inputFps);
       update({ stage: "encoding", fileProgress: 0, message: "Encoding…" });
 
       const exitCode = await ff.exec(args);
@@ -549,6 +550,7 @@ function buildSequenceArgs(
   output: string,
   s: ExportSettings,
   durationSeconds: number,
+  inputFps: number,
 ): string[] {
   const vf =
     `scale=${s.width}:${s.height}:force_original_aspect_ratio=decrease,` +
@@ -558,8 +560,10 @@ function buildSequenceArgs(
   return [
     "-y",
     "-hide_banner",
-    // Input 0: image sequence at the desired framerate.
-    "-framerate", String(s.fps),
+    // Input 0: image sequence. -framerate controls how long each image
+    // lasts in the timebase (e.g. 1 fps = 1 second per image). The -r
+    // flag further down then duplicates frames up to the output rate.
+    "-framerate", String(inputFps),
     "-i", pattern,
     // Input 1: silent stereo audio so the output has an AAC track matching
     // the DDA preset. -shortest below cuts it to the image duration.

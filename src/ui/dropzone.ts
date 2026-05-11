@@ -71,13 +71,13 @@ export function bindDropzone(opts: DropzoneOptions): void {
     if (files.length) onFiles(files);
   });
 
-  // URL form
+  // URL form. Empty submissions are passed through so the app can apply
+  // its easter-egg default; the input is cleared either way.
   urlForm.addEventListener("click", (e) => e.stopPropagation());
   urlForm.addEventListener("submit", (e) => {
     e.preventDefault();
     e.stopPropagation();
     const u = urlInput.value.trim();
-    if (!u) return;
     onUrl(u);
     urlInput.value = "";
   });
