@@ -138,6 +138,9 @@ export function bootApp(): void {
       const totalSize = imgs.reduce((s, x) => s + (x.size || 0), 0);
       const ext = extOf(imgs[0].name);
       const seqInputFps = Math.max(0.01, preset.sequenceFps || preset.fps);
+      // First-frame preview for the Original pane.
+      let srcUrl: string | undefined;
+      try { srcUrl = URL.createObjectURL(imgs[0]); } catch { /* ignore */ }
       const item: QueueItem = {
         id: String(nextId++),
         kind: "sequence",
@@ -147,6 +150,7 @@ export function bootApp(): void {
         w: 0,
         h: 0,
         files: imgs,
+        srcUrl,
         outSize: 0,
         status: "queued",
         progress: 0,
@@ -160,8 +164,9 @@ export function bootApp(): void {
     if (newItems.length === 0) return;
     items = [...items, ...newItems];
     for (const item of newItems) {
-      // Auto-expand video items so the preview pane is visible immediately.
-      if (item.kind === "video") expanded[item.id] = true;
+      // Auto-expand any item with a previewable source — videos with a
+      // srcUrl, and sequences whose first frame we captured as a thumbnail.
+      if (item.srcUrl) expanded[item.id] = true;
     }
     queueView.setExpanded(expanded);
     queueView.setItems(items);

@@ -7,6 +7,17 @@
 
 import { fmtBytes, fmtDuration } from "../utils/formatBytes.js";
 
+// Extensions whose Original preview should use an <img> (animated GIF /
+// animated WebP / still images) rather than a <video> element. Browsers
+// can play animated gif/webp natively in <img>, but <video> can't.
+const IMG_PREVIEW_EXTS = new Set(["gif", "webp", "png", "jpg", "jpeg", "tif", "tiff", "bmp"]);
+
+function extOfName(name: string | undefined): string {
+  if (!name) return "";
+  const m = /\.([a-z0-9]+)$/i.exec(name);
+  return m ? m[1].toLowerCase() : "";
+}
+
 export type ItemKind = "video" | "sequence";
 export type ItemStatus = "queued" | "encoding" | "done" | "err" | "cancelled";
 
@@ -259,27 +270,34 @@ export class QueueView {
     const wrap = document.createElement("div");
     wrap.className = "preview";
 
-    const originalPlaceholder = f.kind === "sequence"
-      ? `${f.frames || 0} frames · ${f.ext || ""}`
-      : "no source";
+    // Pick the right preview element type by source extension. Animated
+    // GIF / WebP and still images don't render in <video>, so we use <img>
+    // when the source is one of those.
+    const srcExt = f.kind === "sequence"
+      ? (f.ext || extOfName(f.files[0]?.name))
+      : extOfName(f.files[0]?.name);
+    const useImg = IMG_PREVIEW_EXTS.has(srcExt);
+
     const originalMeta = f.kind === "sequence"
-      ? `${f.frames || 0} frames`
+      ? `${f.frames || 0} frames${f.ext ? " · " + f.ext : ""}`
       : f.w && f.h
         ? `${f.w}×${f.h}`
         : "";
+    const originalPlaceholder = f.kind === "sequence"
+      ? `${f.frames || 0} frames · ${f.ext || ""}`
+      : "no source";
 
-    // Original — for video kind, show the source if we have a srcUrl.
-    // For sequence kind, show a placeholder summarizing the input.
     wrap.appendChild(
       this.renderPreviewPane({
         label: "Original",
-        src: f.kind === "video" ? f.srcUrl : undefined,
+        src: f.srcUrl,
         meta: originalMeta,
         placeholderText: originalPlaceholder,
+        mediaKind: useImg ? "img" : "video",
       }),
     );
 
-    // Exported — placeholder while waiting / encoding / failed.
+    // Exported is always an MP4 — <video>.
     const exportedMeta = f.status === "done"
       ? `1920×1080 · ${fmtBytes(f.outSize)}`
       : "";
@@ -289,6 +307,7 @@ export class QueueView {
         src: f.status === "done" ? f.outUrl : undefined,
         meta: exportedMeta,
         placeholderText: exportedPlaceholderText(f),
+        mediaKind: "video",
       }),
     );
     return wrap;
@@ -299,6 +318,7 @@ export class QueueView {
     src: string | undefined;
     meta: string;
     placeholderText: string;
+    mediaKind: "video" | "img";
   }): HTMLElement {
     const pv = document.createElement("div");
     pv.className = "pv";
@@ -317,14 +337,23 @@ export class QueueView {
     const frame = document.createElement("div");
     frame.className = "pv-frame";
     if (args.src) {
-      const v = document.createElement("video");
-      v.src = args.src;
-      v.controls = true;
-      v.playsInline = true;
-      v.muted = true;
-      v.loop = true;
-      v.preload = "metadata";
-      frame.appendChild(v);
+      if (args.mediaKind === "img") {
+        const img = document.createElement("img");
+        img.src = args.src;
+        img.alt = args.label;
+        img.decoding = "async";
+        img.loading = "lazy";
+        frame.appendChild(img);
+      } else {
+        const v = document.createElement("video");
+        v.src = args.src;
+        v.controls = true;
+        v.playsInline = true;
+        v.muted = true;
+        v.loop = true;
+        v.preload = "metadata";
+        frame.appendChild(v);
+      }
     } else {
       frame.classList.add("placeholder");
       frame.textContent = args.placeholderText;

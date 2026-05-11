@@ -127,15 +127,6 @@ export class PresetPanel {
       (v) => { this.current = { ...this.current, fps: Number(v) }; },
     ));
 
-    // Image-sequence input rate. Output is always `fps`; this controls how
-    // long each input image lasts before the next one. 1 fps = 1 sec each.
-    grid.appendChild(this.makeNumber("Image seq fps",
-      () => this.current.sequenceFps,
-      "fps", 0.1, 120,
-      (n) => { this.current = { ...this.current, sequenceFps: n }; },
-      "any",
-    ));
-
     grid.appendChild(this.makeNumber("Video bitrate",
       () => Math.round(this.current.videoBitrate / 1_000_000),
       "Mbps", 1, 80,
@@ -163,6 +154,16 @@ export class PresetPanel {
       () => this.current.keyframeInterval,
       "frames", 1, 600,
       (n) => { this.current = { ...this.current, keyframeInterval: n }; },
+    ));
+
+    // Image-sequence input rate goes last — it's a niche control that only
+    // applies to sequence jobs. Output is always `fps`; this controls how
+    // long each input image lasts before the next one. 1 fps = 1 sec each.
+    grid.appendChild(this.makeNumber("Image seq fps",
+      () => this.current.sequenceFps,
+      "fps", 0.1, 120,
+      (n) => { this.current = { ...this.current, sequenceFps: n }; },
+      "any",
     ));
 
     root.appendChild(grid);
